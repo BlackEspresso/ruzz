@@ -66,10 +66,6 @@ fn main(){
 			newpath.push(time::precise_time_s().to_string());
 			fs::copy(&o_path,&newpath);
 		}
-
-		if i>=100  {
-			break;
-		}
 	}
 }
 
