@@ -13,7 +13,6 @@ use std::io::File;
 use std::vec;
 use std::collections::HashMap;
 use std::rand::{task_rng, Rng};
-mod murmur;
 mod readrcov;
 mod runrio;
 
@@ -51,13 +50,18 @@ fn main(){
 	let mut map:HashMap<u32,u16> = HashMap::new();
 	let mut i:int = 0;
 
-	let mut inputpath = os::getcwd();
+	let mut inputpath = os::getcwd().unwrap();
 	inputpath.push(settings.input_dir.clone());
 
 	let o_path = Path::new(&settings.output_file);
 
 	loop{
-		write_new_file(&o_path,&inputpath);
+		if i%2 == 0{
+			open_file_and_mutate(&o_path,&inputpath, mutator_add_random_bit);
+		} else {
+			open_file_and_mutate(&o_path,&inputpath, mutator_add_random_bit);
+		}
+
 		let newBlocksCount = fuzzing_step(&settings,&mut map);
 		i+=1;
 
@@ -72,14 +76,14 @@ fn main(){
 // 1. pick old file
 // 2. mutate old file
 // 3. write new file
-fn write_new_file(output_file:&Path, inputDir:&Path){
+fn open_file_and_mutate(output_file:&Path, inputDir:&Path, mutator:fn(&mut Vec<u8>)){
 
 	let file = pick_file_from_dir(inputDir);
 	println!("picking {}",file.display());
 
 	let mut content = File::open(&file).read_to_end().unwrap();
 	println!("mutating...");
-	mutate(&mut content);
+	mutator(&mut content);
 	
 	println!("creating new file")
 	let mut ofile = match File::create(output_file){
@@ -93,7 +97,17 @@ fn write_new_file(output_file:&Path, inputDir:&Path){
 	};
 }
 
-fn mutate(filecontent:&mut Vec<u8>){
+fn mutator_add_random_bit(filecontent:&mut Vec<u8>){
+	let len = filecontent.len();
+	let mut rng = task_rng();
+	let pos = rng.gen_range(0,len);
+	let el:u8 = rng.gen_range(0,255);
+
+	filecontent.insert(pos,el);
+}
+
+
+fn mutator_change_random_bit(filecontent:&mut Vec<u8>){
 	let len = filecontent.len();
 	let mut rng = task_rng();
 	let n = rng.gen_range(0,len);
@@ -165,17 +179,17 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 		statistic_file:	"".to_string(),
 		verbose:		false,
 		help:			false,
-		app_args:		[]
+		app_args:		[].as_slice()
 	};
 
 	// check if arguments, if not => panic
-	let matches = match getopts(args.tail(),opts){
+	let matches = match getopts(args.tail(),opts.as_slice()){
 		Ok(m)=>{m}
 		Err(f)=>{panic!(f.to_string())}
 	};
 
 	if matches.opt_present("h") {
-		print_usage(program.as_slice(),opts);
+		print_usage(program.as_slice(),opts.as_slice());
 		settings.help = true;
 		return settings;
 	}
