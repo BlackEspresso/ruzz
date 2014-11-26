@@ -23,7 +23,8 @@ struct AppSettings<'a> {
 	statistic_file:	String,
 	verbose:		bool,
 	help:			bool,
-	app_args:		&'a [&'a str]
+	app_args:		&'a [&'a str],
+	benchmark:		bool
 }
 
 fn print_usage(program: &str, _opts: &[OptGroup]) {
@@ -57,20 +58,35 @@ fn main(){
 
 	let mut start = time::get_time();
 
+	let inputfiles = get_files_in_dir(&inputpath);
+
+	if !settings.benchmark {
+		// read previously created files and add to blocks to hashmap
+		// this enables pause + resume behaviour
+		for input_file in inputfiles.iter() {
+			open_mutate_write(&o_path, input_file, mutator_empty);
+			fuzzing_step(&settings,&mut map);
+		}
+	}
+
 	loop{
 		let actionnumber = i % 3;
 
-		match actionnumber {
-			0 => open_file_and_mutate(&o_path, &inputpath, mutator_add_random_bit),
-			1 => open_file_and_mutate(&o_path, &inputpath, mutator_xor_random_bit),
-			2 => open_file_and_mutate(&o_path, &inputpath, mutator_enable_3random_bits),
-			_ => panic!("not handled action")
+		let input_file = pick_file_from_dir(&inputpath);
+
+		if !settings.benchmark {
+			match actionnumber {
+				0 => open_mutate_write(&o_path, &input_file, mutator_add_random_bit),
+				1 => open_mutate_write(&o_path, &input_file, mutator_xor_random_bit),
+				2 => open_mutate_write(&o_path, &input_file, mutator_enable_3random_bits),
+				_ => panic!("not handled action")
+			}
 		}
 
 		let newBlocksCount = fuzzing_step(&settings,&mut map);
 		i += 1;
 
-		if i>1 && newBlocksCount>0 {
+		if i>1 && newBlocksCount>0 && !settings.benchmark {
 			let mut newpath = inputpath.clone();
 			let now = time::get_time();
 			newpath.push(now.sec.to_string()+"_"+now.nsec.to_string());
@@ -86,12 +102,11 @@ fn main(){
 	}
 }
 
-// 1. pick old file
-// 2. mutate old file
-// 3. write new file
-fn open_file_and_mutate(output_file:&Path, input_dir:&Path, mutator:fn(&mut Vec<u8>)){
-	let file = pick_file_from_dir(input_dir);
-	let mut content = File::open(&file).read_to_end().unwrap();
+// 1. open input file
+// 2. mutate with mutator
+// 3. write output file
+fn open_mutate_write(output_file:&Path, input_file:&Path, mutator:fn(&mut Vec<u8>)){
+	let mut content = File::open(input_file).read_to_end().unwrap();
 	// run mutator function
 	mutator(&mut content);
 	
@@ -104,6 +119,10 @@ fn open_file_and_mutate(output_file:&Path, input_dir:&Path, mutator:fn(&mut Vec<
 		Err(e) => panic!(e),
 		_ =>{}
 	};
+}
+
+fn mutator_empty(filecontent:&mut Vec<u8>){
+
 }
 
 fn mutator_add_random_bit(filecontent:&mut Vec<u8>){
@@ -132,6 +151,19 @@ fn mutator_enable_3random_bits(filecontent:&mut Vec<u8>){
 	let m = 0b111 << rng.gen_range(0,5);
 
 	filecontent[n] = filecontent[n]|m;
+}
+
+fn get_files_in_dir(dir:&Path) -> Vec<Path>{
+	let filenames = fs::readdir(&Path::new(dir)).unwrap();
+	let mut files:Vec<Path> = Vec::new();
+
+	for f in filenames.iter() {
+		let mut filepath = dir.clone();
+		filepath.push(f);
+		files.push(filepath.clone());
+	}
+	
+	files
 }
 
 fn pick_file_from_dir(dir:&Path) -> Path{
@@ -182,7 +214,8 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 		optopt("i", "input", "input directory with example files",""),
 		optopt("s", "statistic", "output file with statistics",""),
         optflag("h","help", "print this help menu"),
-        optflag("v","verbose", "output verbose")
+        optflag("v","verbose", "output verbose"),
+        optflag("b","benachmark", "benachmark target")
 	];
 
 	let mut settings = AppSettings {
@@ -192,7 +225,8 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 		statistic_file:	"".to_string(),
 		verbose:		false,
 		help:			false,
-		app_args:		[].as_slice()
+		app_args:		[].as_slice(),
+		benchmark:		false
 	};
 
 	// check if arguments, if not => panic
@@ -209,6 +243,10 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 
 	if matches.opt_present("v") {
 		settings.verbose = true;
+	}
+
+	if matches.opt_present("b") {
+		settings.benchmark = true;
 	}
 
 	let output = matches.opt_str("o");
