@@ -45,7 +45,7 @@ fn main(){
 		return;
 	}
 
-	let aut = ["C:\\tmp\\7za.exe","l","test.zip"]; // app under test
+	let aut = ["C:\\tmp\\7za.exe","e","-y","test.zip"]; // app under test
 	settings.app_args = aut.slice(0,aut.len());
 
 	let mut map:HashMap<u32,u16> = HashMap::new();
@@ -63,14 +63,16 @@ fn main(){
 	if !settings.benchmark {
 		// read previously created files and add to blocks to hashmap
 		// this enables pause + resume behaviour
+		println!("reading input files");
 		for input_file in inputfiles.iter() {
 			open_mutate_write(&o_path, input_file, mutator_empty);
 			fuzzing_step(&settings,&mut map);
 		}
 	}
-
+	
+	println!("start fuzzing...");
 	loop{
-		let actionnumber = i % 3;
+		let actionnumber = i % 4;
 
 		let input_file = pick_file_from_dir(&inputpath);
 
@@ -79,6 +81,7 @@ fn main(){
 				0 => open_mutate_write(&o_path, &input_file, mutator_add_random_bit),
 				1 => open_mutate_write(&o_path, &input_file, mutator_xor_random_bit),
 				2 => open_mutate_write(&o_path, &input_file, mutator_enable_3random_bits),
+				3 => open_mutate_write(&o_path, &input_file, mutator_xor_broken_random_bit),
 				_ => panic!("not handled action")
 			}
 		}
@@ -134,6 +137,15 @@ fn mutator_add_random_bit(filecontent:&mut Vec<u8>){
 	filecontent.insert(pos,el);
 }
 
+
+fn mutator_xor_broken_random_bit(filecontent:&mut Vec<u8>){
+	let len = filecontent.len();
+	let mut rng = task_rng();
+	let n = rng.gen_range(0,len);
+	let m = rng.gen_range(0,7);
+
+	filecontent[n] = filecontent[n]^m;
+}
 
 fn mutator_xor_random_bit(filecontent:&mut Vec<u8>){
 	let len = filecontent.len();
