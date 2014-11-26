@@ -55,20 +55,33 @@ fn main(){
 
 	let o_path = Path::new(&settings.output_file);
 
+	let mut start = time::get_time();
+
 	loop{
-		if i%2 == 0{
-			open_file_and_mutate(&o_path,&inputpath, mutator_add_random_bit);
-		} else {
-			open_file_and_mutate(&o_path,&inputpath, mutator_add_random_bit);
+		let actionnumber = i % 3;
+
+		match actionnumber {
+			0 => open_file_and_mutate(&o_path, &inputpath, mutator_add_random_bit),
+			1 => open_file_and_mutate(&o_path, &inputpath, mutator_xor_random_bit),
+			2 => open_file_and_mutate(&o_path, &inputpath, mutator_enable_3random_bits),
+			_ => panic!("not handled action")
 		}
 
 		let newBlocksCount = fuzzing_step(&settings,&mut map);
-		i+=1;
+		i += 1;
 
-		if i>1 && newBlocksCount>0{
+		if i>1 && newBlocksCount>0 {
 			let mut newpath = inputpath.clone();
-			newpath.push(time::precise_time_s().to_string());
+			let now = time::get_time();
+			newpath.push(now.sec.to_string()+"_"+now.nsec.to_string());
 			fs::copy(&o_path,&newpath);
+		}
+
+		if i%100 == 0 {
+			let now = time::get_time();
+			let diff = (now.sec-start.sec);
+			println!("{} seconds for 100 runs => {} runs per second", diff, 100_f32/diff as f32);
+			start = now;
 		}
 	}
 }
@@ -76,16 +89,12 @@ fn main(){
 // 1. pick old file
 // 2. mutate old file
 // 3. write new file
-fn open_file_and_mutate(output_file:&Path, inputDir:&Path, mutator:fn(&mut Vec<u8>)){
-
-	let file = pick_file_from_dir(inputDir);
-	println!("picking {}",file.display());
-
+fn open_file_and_mutate(output_file:&Path, input_dir:&Path, mutator:fn(&mut Vec<u8>)){
+	let file = pick_file_from_dir(input_dir);
 	let mut content = File::open(&file).read_to_end().unwrap();
-	println!("mutating...");
+	// run mutator function
 	mutator(&mut content);
 	
-	println!("creating new file")
 	let mut ofile = match File::create(output_file){
 		Err(e) => panic!(e),
 		Ok(f) => f,
@@ -107,13 +116,22 @@ fn mutator_add_random_bit(filecontent:&mut Vec<u8>){
 }
 
 
-fn mutator_change_random_bit(filecontent:&mut Vec<u8>){
+fn mutator_xor_random_bit(filecontent:&mut Vec<u8>){
 	let len = filecontent.len();
 	let mut rng = task_rng();
 	let n = rng.gen_range(0,len);
-	let m = rng.gen_range(0,7);
+	let m = 1 << rng.gen_range(0,7);
 
 	filecontent[n] = filecontent[n]^m;
+}
+
+fn mutator_enable_3random_bits(filecontent:&mut Vec<u8>){
+	let len = filecontent.len();
+	let mut rng = task_rng();
+	let n = rng.gen_range(0,len);
+	let m = 0b111 << rng.gen_range(0,5);
+
+	filecontent[n] = filecontent[n]|m;
 }
 
 fn pick_file_from_dir(dir:&Path) -> Path{
@@ -130,18 +148,13 @@ fn pick_file_from_dir(dir:&Path) -> Path{
 
 fn fuzzing_step(settings:&AppSettings, map:&mut HashMap<u32,u16>)->uint {
 	// run drcov
-	println!("run drcov");
 	runrio::rundrcov(settings.app_args);
-	println!("find drcovlog file");
 	let inputpath = find_file_by_filter(".",".proc.log").unwrap();
-	
 	// read file and update hashmap
-	println!("read file and update hashmap");
 	let maplen = map.len();
 	readrcov::convert(&inputpath,map);
-	// any more blocks ?
+	// any new code blocks ?
 	let new_blocks:uint = map.len()-maplen;
-	println!("found {} more blocks",new_blocks);
 	fs::unlink(&inputpath);
 
 	new_blocks

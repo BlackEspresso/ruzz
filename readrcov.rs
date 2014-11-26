@@ -25,8 +25,8 @@ pub fn convert(inputpath:&Path, map:&mut HashMap<u32,u16>){
 fn read_file_header(br:&mut BufferedReader<std::io::IoResult<File>>){
 	let version_line = br.read_line().unwrap();
 	let flavor_line = br.read_line().unwrap();
-	print!("{}",version_line);
-	print!("{}",flavor_line);
+	//print!("{}",version_line);
+	//print!("{}",flavor_line);
 }
 
 fn read_module_table_size(br:&mut BufferedReader<std::io::IoResult<File>>)->Option<uint>{
@@ -59,7 +59,7 @@ fn read_module_table(br:&mut BufferedReader<std::io::IoResult<File>>, size:uint)
 		let mod_id:int = from_str(cap.at(1)).unwrap();
 		let mod_size:int = from_str(cap.at(2)).unwrap();
 		let mod_path:String = from_str(cap.at(3)).unwrap();
-		println!("{}, {}, {}", mod_id,mod_size,mod_path);
+		//println!("{}, {}, {}", mod_id,mod_size,mod_path);
 		modules.push(mod_path);
 	}
 

@@ -22,5 +22,5 @@ pub fn rundrcov(cmd:&[&str]) {
 		.as_mut().unwrap()
 		.read_to_string().unwrap();
 
-	println!("{}",output);
+	//println!("{}",output);
 }

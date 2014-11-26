@@ -1,0 +1,1 @@
+main.exe -o  c:\tmp\test.zip -i c:\tmp\vector_zip_examples
