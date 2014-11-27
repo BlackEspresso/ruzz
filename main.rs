@@ -66,7 +66,7 @@ fn main(){
 		println!("reading input files");
 		for input_file in inputfiles.iter() {
 			open_mutate_write(&o_path, input_file, mutator_empty);
-			fuzzing_step(&settings,&mut map);
+			fuzzing_step(&settings,&mut map, true);
 		}
 	}
 	
@@ -86,7 +86,7 @@ fn main(){
 			}
 		}
 
-		let newBlocksCount = fuzzing_step(&settings,&mut map);
+		let newBlocksCount = fuzzing_step(&settings,&mut map,!settings.benchmark);
 		i += 1;
 
 		if i>1 && newBlocksCount>0 && !settings.benchmark {
@@ -190,9 +190,9 @@ fn pick_file_from_dir(dir:&Path) -> Path{
 	filepath
 }
 
-fn fuzzing_step(settings:&AppSettings, map:&mut HashMap<u32,u16>)->uint {
+fn fuzzing_step(settings:&AppSettings, map:&mut HashMap<u32,u16>, instrumentation:bool)->uint {
 	// run drcov
-	runrio::rundrcov(settings.app_args);
+	runrio::rundrcov(settings.app_args,instrumentation);
 	let inputpath = find_file_by_filter(".",".proc.log").unwrap();
 	// read file and update hashmap
 	let maplen = map.len();
