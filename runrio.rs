@@ -1,17 +1,26 @@
 use std::io::Command;
 use std::io::fs::PathExtensions;
 
-pub fn rundrcov(cmd:&[&str]) {
+pub fn rundrcov(cmd:&[&str], with_instrumentation:bool) {
 	let rioroot = Path::new(&"C:\\dynamorio-package\\");
 	let mut drrun = rioroot.clone();
 	drrun.push(&"bin32\\drrun.exe");
 	let mut drcov = rioroot.clone();
 	drcov.push(&"tools\\lib32\\release\\drcov.dll");
 
-	let mut command = Command::new(drrun);
-	let mut commandarg = command.arg("-root").arg(rioroot)
+	let mut command :Command;
+	let mut commandarg :&mut Command;
+
+	if !with_instrumentation {
+		command = Command::new(drrun);
+		commandarg = command.arg("-root").arg(rioroot)
 			.arg("-c").arg(drcov)
-			.arg("--").args(cmd);
+			.arg("--").args(cmd);	
+	} else {
+		command = Command::new(cmd[0]);
+		commandarg = command.args(cmd.slice(1,cmd.len()));
+	}
+
 
 	let mut process = match commandarg.spawn(){
   		Ok(p) => p,
