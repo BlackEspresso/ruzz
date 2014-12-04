@@ -74,20 +74,20 @@ fn read_bb_table_and_write(br:&mut BufferedReader<std::io::IoResult<File>>,
 		let size = br.read_le_u16().unwrap();
 		let mod_id :u16 = br.read_le_u16().unwrap();
 		
-		//if mod_id == 0 {
 		write_to.write_str(format!("{:x}, {}\n",addr,mod_id).as_slice());
-
-		//}
-		
 	}
 }
 
 fn read_bb_table_to_hash(br:&mut BufferedReader<std::io::IoResult<File>>, map:&mut HashMap<u32,u16>,size:uint){
+	let module_ids = 0;
+
 	for _ in range(0,size){
 		let addr:u32 = br.read_le_u32().unwrap();
 		let size = br.read_le_u16().unwrap();
 		let mod_id = br.read_le_u16().unwrap();
+		if module_ids == mod_id {
+			map.insert(addr, mod_id);
+		}
 		
-		map.insert(addr, mod_id);
 	}
 }

@@ -10,7 +10,6 @@ use getopts::{optopt,optflag,getopts,OptGroup};
 use std::os;
 use std::io::fs;
 use std::io::File;
-use std::vec;
 use std::collections::HashMap;
 use std::rand::{task_rng, Rng};
 mod readrcov;
@@ -45,7 +44,7 @@ fn main(){
 		return;
 	}
 
-	let aut = ["C:\\tmp\\7za.exe","e","-y","test.zip"]; // app under test
+	let aut = ["C:\\tmp\\7za.exe","e","-y","-pqqq","test.zip"]; // app under test
 	settings.app_args = aut.slice(0,aut.len());
 
 	let mut map:HashMap<u32,u16> = HashMap::new();
@@ -54,7 +53,7 @@ fn main(){
 	let mut inputpath = os::getcwd().unwrap();
 	inputpath.push(settings.input_dir.clone());
 
-	let o_path = Path::new(&settings.output_file);
+	let output_file = Path::new(&settings.output_file);
 
 	let mut start = time::get_time();
 
@@ -65,42 +64,64 @@ fn main(){
 		// this enables pause + resume behaviour
 		println!("reading input files");
 		for input_file in inputfiles.iter() {
-			open_mutate_write(&o_path, input_file, mutator_empty);
-			fuzzing_step(&settings,&mut map, true);
+			let mut content = File::open(input_file).read_to_end().unwrap();
+			write_content_to(&mut content,&output_file);
+			run_target(&settings, &mut map);
 		}
+
+		println!("start fuzzing...");
 	}
 	
-	println!("start fuzzing...");
-	loop{
-		let actionnumber = i % 4;
+	let mut rng = task_rng();
+	let fuzz_length_bit :uint = 50 * 8;
+
+	loop { // main loop - loops to infinity
 
 		let input_file = pick_file_from_dir(&inputpath);
+		let content_org = File::open(&input_file).read_to_end().unwrap();
+		let file_length_bit = (content_org.len()-1)*8;
+		let mut start_pos = rng.gen_range(0, file_length_bit - fuzz_length_bit);
+		let action_number:u8 = rng.gen_range(0,3);
+		let mutator_pos : (int,int) = (0,0);
+		let mut position_iter:uint = 0;
 
-		if !settings.benchmark {
-			match actionnumber {
-				0 => open_mutate_write(&o_path, &input_file, mutator_add_random_bit),
-				1 => open_mutate_write(&o_path, &input_file, mutator_xor_random_bit),
-				2 => open_mutate_write(&o_path, &input_file, mutator_enable_3random_bits),
-				3 => open_mutate_write(&o_path, &input_file, mutator_xor_broken_random_bit),
-				_ => panic!("not handled action")
+		loop { // position loop - increments file position
+			//loop { // iteration loop  - increments iteration count
+				let filepos = start_pos + position_iter;
+				let mut content = content_org.clone();
+				if !settings.benchmark {
+					match action_number {
+						0 => mutator_add_random_byte(&mut content, filepos),
+						1 => mutator_enable_1_bits(&mut content, filepos),
+						2 => mutator_enable_4_bits(&mut content, filepos),
+						_ => panic!("not handled action")
+					}
+				}
+
+				write_content_to(&mut content, &output_file);
+
+				let newBlocksCount = run_target(&settings, &mut map);
+
+				if i>1 && newBlocksCount > 0 && !settings.benchmark {
+					let mut newpath = inputpath.clone();
+					let now = time::get_time();
+					newpath.push(now.sec.to_string()+"_"+now.nsec.to_string());
+					fs::copy(&output_file,&newpath);
+				}
+
+				if i % 1000 == 0 && i>0 {
+					let now = time::get_time();
+					let diff = now.sec-start.sec;
+					println!("{} seconds for 1000 runs => {} runs per second", diff, 1000_f32/diff as f32);
+					start = now;
+				}
+
+				i += 1;
+			//}
+			position_iter += 1;
+			if position_iter >= 50 {
+				break;
 			}
-		}
-
-		let newBlocksCount = fuzzing_step(&settings,&mut map,!settings.benchmark);
-		i += 1;
-
-		if i>1 && newBlocksCount>0 && !settings.benchmark {
-			let mut newpath = inputpath.clone();
-			let now = time::get_time();
-			newpath.push(now.sec.to_string()+"_"+now.nsec.to_string());
-			fs::copy(&o_path,&newpath);
-		}
-
-		if i%100 == 0 {
-			let now = time::get_time();
-			let diff = (now.sec-start.sec);
-			println!("{} seconds for 100 runs => {} runs per second", diff, 100_f32/diff as f32);
-			start = now;
 		}
 	}
 }
@@ -108,10 +129,7 @@ fn main(){
 // 1. open input file
 // 2. mutate with mutator
 // 3. write output file
-fn open_mutate_write(output_file:&Path, input_file:&Path, mutator:fn(&mut Vec<u8>)){
-	let mut content = File::open(input_file).read_to_end().unwrap();
-	// run mutator function
-	mutator(&mut content);
+fn write_content_to(content:&mut Vec<u8>,output_file:&Path){
 	
 	let mut ofile = match File::create(output_file){
 		Err(e) => panic!(e),
@@ -124,45 +142,31 @@ fn open_mutate_write(output_file:&Path, input_file:&Path, mutator:fn(&mut Vec<u8
 	};
 }
 
-fn mutator_empty(filecontent:&mut Vec<u8>){
+fn mutator_add_random_byte(filecontent:&mut Vec<u8>, pos:uint){
+	let mut rng = task_rng();
+	let byte:u8 = rng.gen_range(0,255);
+	let bytepos = pos/8;
 
+	filecontent.insert(bytepos,byte);
 }
 
-fn mutator_add_random_bit(filecontent:&mut Vec<u8>){
-	let len = filecontent.len();
-	let mut rng = task_rng();
-	let pos = rng.gen_range(0,len);
-	let el:u8 = rng.gen_range(0,255);
+fn mutator_enable_1_bits(filecontent:&mut Vec<u8>, pos:uint){
+	let shift_count :uint = pos % 8;
+	let bytepos = pos/8;
+	let mut m = 0b1;
+	m = m << shift_count;
 
-	filecontent.insert(pos,el);
+	filecontent[bytepos] = filecontent[bytepos]|m;
 }
 
+fn mutator_enable_4_bits(filecontent:&mut Vec<u8>, pos:uint){
+	let shift_count :uint = pos % 8;
+	let bytepos = pos/8;
+	let mut m = 0b1111;
 
-fn mutator_xor_broken_random_bit(filecontent:&mut Vec<u8>){
-	let len = filecontent.len();
-	let mut rng = task_rng();
-	let n = rng.gen_range(0,len);
-	let m = rng.gen_range(0,7);
+	m = m << 4 * shift_count;
 
-	filecontent[n] = filecontent[n]^m;
-}
-
-fn mutator_xor_random_bit(filecontent:&mut Vec<u8>){
-	let len = filecontent.len();
-	let mut rng = task_rng();
-	let n = rng.gen_range(0,len);
-	let m = 1 << rng.gen_range(0,7);
-
-	filecontent[n] = filecontent[n]^m;
-}
-
-fn mutator_enable_3random_bits(filecontent:&mut Vec<u8>){
-	let len = filecontent.len();
-	let mut rng = task_rng();
-	let n = rng.gen_range(0,len);
-	let m = 0b111 << rng.gen_range(0,5);
-
-	filecontent[n] = filecontent[n]|m;
+	filecontent[bytepos] = filecontent[bytepos]|m;
 }
 
 fn get_files_in_dir(dir:&Path) -> Vec<Path>{
@@ -190,16 +194,21 @@ fn pick_file_from_dir(dir:&Path) -> Path{
 	filepath
 }
 
-fn fuzzing_step(settings:&AppSettings, map:&mut HashMap<u32,u16>, instrumentation:bool)->uint {
+fn run_target(settings:&AppSettings, map:&mut HashMap<u32,u16>)->uint {
 	// run drcov
-	runrio::rundrcov(settings.app_args,instrumentation);
-	let inputpath = find_file_by_filter(".",".proc.log").unwrap();
-	// read file and update hashmap
-	let maplen = map.len();
-	readrcov::convert(&inputpath,map);
-	// any new code blocks ?
-	let new_blocks:uint = map.len()-maplen;
-	fs::unlink(&inputpath);
+	runrio::rundrcov(settings.app_args, !settings.benchmark);
+	
+	let mut new_blocks: uint = 0;
+
+	if !settings.benchmark {
+		let inputpath = find_file_by_filter(".",".proc.log").unwrap();
+		// read file and update hashmap
+		let maplen = map.len();
+		readrcov::convert(&inputpath, map);	
+		// any new code blocks ?
+		new_blocks = map.len()-maplen;
+		fs::unlink(&inputpath);
+	}
 
 	new_blocks
 }
@@ -227,7 +236,7 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 		optopt("s", "statistic", "output file with statistics",""),
         optflag("h","help", "print this help menu"),
         optflag("v","verbose", "output verbose"),
-        optflag("b","benachmark", "benachmark target")
+        optflag("b","benchmark", "benchmark target")
 	];
 
 	let mut settings = AppSettings {
