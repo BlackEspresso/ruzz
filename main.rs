@@ -82,7 +82,7 @@ fn main(){
 		let file_length_bit = (content_org.len()-1)*8;
 		let mut start_pos = rng.gen_range(0, file_length_bit - fuzz_length_bit);
 		let action_number:u8 = rng.gen_range(0,3);
-		let mutator_pos : (int,int) = (0,0);
+		let mutator_pos :(int,int) = (0,0);
 		let mut position_iter:uint = 0;
 
 		loop { // position loop - increments file position
@@ -106,10 +106,10 @@ fn main(){
 					let mut newpath = inputpath.clone();
 					let now = time::get_time();
 					newpath.push(now.sec.to_string()+"_"+now.nsec.to_string());
-					fs::copy(&output_file,&newpath);
+					fs::copy(&output_file, &newpath);
 				}
 
-				if i % 1000 == 0 && i>0 {
+				if i % 1000 == 0 && i > 0 {
 					let now = time::get_time();
 					let diff = now.sec-start.sec;
 					println!("{} seconds for 1000 runs => {} runs per second", diff, 1000_f32/diff as f32);
@@ -281,4 +281,15 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 	}
 
 	settings
+}
+
+
+[#test]
+fn test_mutator_enable_1_bits(){
+	let mut content = Vec<u8>();
+	content.insert(0b00000001);
+
+	mutator_enable_1_bits(&content, 1)
+	
+	assert!(content[0] == 0b00000011);
 }
