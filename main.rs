@@ -67,14 +67,19 @@ fn main(){
 		for input_file in inputfiles.iter() {
 			let mut content = File::open(input_file).read_to_end().unwrap();
 			write_content_to(&mut content,&output_file);
-			run_target(&settings, &mut map);
+			let new_blocks_count = run_target(&settings, &mut map);
+			// cleanup input
+			if new_blocks_count == 0 {
+				fs::unlink(input_file);
+			}
 		}
 
 		println!("start fuzzing...");
 	}
 	
 	let mut rng = task_rng();
-	let fuzz_length_bit :uint = 50 * 8;
+	let fuzz_len = 100;
+	let fuzz_length_bit :uint = fuzz_len * 8;
 
 	loop { // main loop - loops to infinity
 
@@ -122,7 +127,7 @@ fn main(){
 				i += 1;
 			//}
 			position_iter += 1;
-			if position_iter >= 50 {
+			if position_iter >= fuzz_len {
 				break;
 			}
 		}
@@ -133,7 +138,6 @@ fn main(){
 // 2. mutate with mutator
 // 3. write output file
 fn write_content_to(content:&mut Vec<u8>,output_file:&Path){
-	
 	let mut ofile = match File::create(output_file){
 		Err(e) => panic!(e),
 		Ok(f) => f,
