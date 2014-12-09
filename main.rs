@@ -10,6 +10,7 @@ use getopts::{optopt,optflag,getopts,OptGroup};
 use std::os;
 use std::io::fs;
 use std::io::File;
+use std::num::Int;
 use std::collections::HashMap;
 use std::rand::{task_rng, Rng};
 mod readrcov;
@@ -153,8 +154,7 @@ fn mutator_add_random_byte(filecontent:&mut Vec<u8>, pos:uint){
 fn mutator_enable_1_bits(filecontent:&mut Vec<u8>, pos:uint){
 	let shift_count :uint = pos % 8;
 	let bytepos = pos/8;
-	let mut m = 0b1;
-	m = m << shift_count;
+	let m = 1 << shift_count;
 
 	filecontent[bytepos] = filecontent[bytepos]|m;
 }
@@ -162,11 +162,14 @@ fn mutator_enable_1_bits(filecontent:&mut Vec<u8>, pos:uint){
 fn mutator_enable_4_bits(filecontent:&mut Vec<u8>, pos:uint){
 	let shift_count :uint = pos % 8;
 	let bytepos = pos/8;
-	let mut m = 0b1111;
+	let first_byte:u8 = 0b1111 << shift_count;
+	let second_byte:u8 = (2i.pow(shift_count-4)) as u8;
 
-	m = m << 4 * shift_count;
+	let index_max = filecontent.len()-1;
 
-	filecontent[bytepos] = filecontent[bytepos]|m;
+	filecontent[bytepos] = filecontent[bytepos]|first_byte;
+	filecontent[bytepos+1] = filecontent[bytepos+1]|second_byte;
+
 }
 
 fn get_files_in_dir(dir:&Path) -> Vec<Path>{
@@ -284,12 +287,37 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 }
 
 
-[#test]
+#[test]
 fn test_mutator_enable_1_bits(){
-	let mut content = Vec<u8>();
-	content.insert(0b00000001);
+	let mut content :Vec<u8> = Vec::with_capacity(1);
+	let startval = 0b00000001;
 
-	mutator_enable_1_bits(&content, 1)
-	
-	assert!(content[0] == 0b00000011);
+	for shift in range(0,8){
+		content.insert(0,startval);
+		content.insert(1,startval);
+
+		mutator_enable_1_bits(&mut content, shift);	
+		assert!(content[0] == (startval |(0b00000001 << shift)),"failed at index {}. returned value: {}",shift,content[0]);
+		assert!(content[1] == startval,"failed at index {}. returned value: {}",shift,content[1]);
+
+		content.clear();
+	}
+}
+
+#[test]
+fn test_mutator_enable_4_bits(){
+	let mut content :Vec<u8> = Vec::with_capacity(1);
+	let startval = 0b00000001;
+
+	for shift in range(0, 8){
+		content.insert(0, startval);
+		content.insert(1, startval);
+
+		mutator_enable_4_bits(&mut content, shift);	
+		assert!(content[0] == startval|(0b00001111 << shift),"failed at index {}. returned value: {} from index 0",shift,content[0]);
+		if shift>4{
+			assert!(content[1] == startval|(0b00000001 << shift-4),"failed at index {}. returned value: {} from index 1",shift,content[1]);
+		}
+		content.clear();
+	}
 }
