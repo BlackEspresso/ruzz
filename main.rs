@@ -82,7 +82,7 @@ fn main(){
 		let content_org = File::open(&input_file).read_to_end().unwrap();
 		let file_length_bit = (content_org.len()-1)*8;
 		let mut start_pos = rng.gen_range(0, file_length_bit - fuzz_length_bit);
-		let action_number:u8 = rng.gen_range(0,4);
+		let action_number:u8 = rng.gen_range(0,5);
 		let mutator_pos :(int,int) = (0,0);
 		let mut position_iter:uint = 0;
 
@@ -96,6 +96,7 @@ fn main(){
 						1 => mutator_enable_1_bits(&mut content, filepos),
 						2 => mutator_enable_4_bits(&mut content, filepos),
 						3 => mutator_enable_8_bits(&mut content, filepos),
+						4 => mutator_xor(&mut content, filepos),
 						_ => panic!("not handled action")
 					}
 				}
@@ -177,6 +178,13 @@ fn mutator_enable_8_bits(filecontent:&mut Vec<u8>, pos:uint){
 	let bytepos = pos/8;
 
 	filecontent[bytepos] = 0xff;
+}
+
+fn mutator_xor(filecontent:&mut Vec<u8>, pos:uint){
+	let shift_count :uint = pos % 8;
+	let bytepos = pos/8;
+
+	filecontent[bytepos] = filecontent[bytepos]^filecontent[bytepos];
 }
 
 fn get_files_in_dir(dir:&Path) -> Vec<Path>{
