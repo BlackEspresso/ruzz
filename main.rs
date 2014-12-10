@@ -64,21 +64,13 @@ fn main(){
 		// read previously created files and add to blocks to hashmap
 		// this enables pause + resume behaviour
 		println!("reading input files");
-		for input_file in inputfiles.iter() {
-			let mut content = File::open(input_file).read_to_end().unwrap();
-			write_content_to(&mut content,&output_file);
-			let new_blocks_count = run_target(&settings, &mut map);
-			// cleanup input
-			if new_blocks_count == 0 {
-				fs::unlink(input_file);
-			}
-		}
+		cleanup_input_files(&inputfiles,&settings,&mut map);
 
 		println!("start fuzzing...");
 	}
 	
 	let mut rng = task_rng();
-	let fuzz_len = 100;
+	let fuzz_len = 20;
 	let fuzz_length_bit :uint = fuzz_len * 8;
 
 	loop { // main loop - loops to infinity
@@ -87,7 +79,7 @@ fn main(){
 		let content_org = File::open(&input_file).read_to_end().unwrap();
 		let file_length_bit = (content_org.len()-1)*8;
 		let mut start_pos = rng.gen_range(0, file_length_bit - fuzz_length_bit);
-		let action_number:u8 = rng.gen_range(0,5);
+		let action_number:u8 = rng.gen_range(0,8);
 		let mutator_pos :(int,int) = (0,0);
 		let mut position_iter:uint = 0;
 
@@ -101,7 +93,10 @@ fn main(){
 						1 => mutator_enable_1_bits(&mut content, filepos),
 						2 => mutator_enable_4_bits(&mut content, filepos),
 						3 => mutator_enable_8_bits(&mut content, filepos),
-						4 => mutator_xor(&mut content, filepos),
+						4 => mutator_enable_16_bits(&mut content, filepos),
+						5 => mutator_enable_24_bits(&mut content, filepos),
+						6 => mutator_enable_32_bits(&mut content, filepos),
+						7 => mutator_xor(&mut content, filepos),
 						_ => panic!("not handled action")
 					}
 				}
@@ -110,7 +105,7 @@ fn main(){
 
 				let newBlocksCount = run_target(&settings, &mut map);
 
-				if i>1 && newBlocksCount > 0 && !settings.benchmark {
+				if i > 1 && newBlocksCount > 0 && !settings.benchmark {
 					let mut newpath = inputpath.clone();
 					let now = time::get_time();
 					newpath.push(now.sec.to_string()+"_"+now.nsec.to_string());
@@ -121,6 +116,12 @@ fn main(){
 					let now = time::get_time();
 					let diff = now.sec-start.sec;
 					println!("{} seconds for 1000 runs => {} runs per second", diff, 1000_f32/diff as f32);
+					if i % 3000 == 0{
+						println!("cleanup");
+						map.clear();
+						cleanup_input_files(&get_files_in_dir(&inputpath),&settings, &mut map);
+					}
+
 					start = now;
 				}
 
@@ -130,6 +131,18 @@ fn main(){
 			if position_iter >= fuzz_len {
 				break;
 			}
+		}
+	}
+}
+
+fn cleanup_input_files(inputfiles: &Vec<Path>, settings: &AppSettings, map: &mut HashMap<u32,u16>){
+	for input_file in inputfiles.iter() {
+		let mut content = File::open(input_file).read_to_end().unwrap();
+		write_content_to(&mut content, &Path::new(&settings.output_file));
+		let new_blocks_count = run_target(settings, map);
+		// cleanup input
+		if new_blocks_count == 0 {
+			fs::unlink(input_file);
 		}
 	}
 }
@@ -170,7 +183,6 @@ fn mutator_enable_4_bits(filecontent:&mut Vec<u8>, pos:uint){
 	let bytepos = pos/8;
 	let first_byte:u8 = 0b1111 << shift_count;
 	let second_byte:u8 = (2i.pow(shift_count-4)) as u8;
-
 	let index_max = filecontent.len()-1;
 
 	filecontent[bytepos] = filecontent[bytepos]|first_byte;
@@ -181,7 +193,55 @@ fn mutator_enable_8_bits(filecontent:&mut Vec<u8>, pos:uint){
 	let shift_count :uint = pos % 8;
 	let bytepos = pos/8;
 
-	filecontent[bytepos] = 0xff;
+	filecontent[bytepos] = 0xFF;
+}
+
+fn mutator_enable_16_bits(filecontent:&mut Vec<u8>, pos:uint){
+	let shift_count :uint = pos % 8;
+	let bytepos = pos/8;
+	let index_max = filecontent.len()-1;
+
+	filecontent[bytepos] = 0xFF;
+	
+	if index_max>bytepos+1 {
+		filecontent[bytepos+1] = 0xFF;
+	}
+}
+
+fn mutator_enable_24_bits(filecontent:&mut Vec<u8>, pos:uint){
+	let shift_count :uint = pos % 8;
+	let bytepos = pos/8;
+	let index_max = filecontent.len()-1;
+
+	filecontent[bytepos] = 0xFF;
+
+	if index_max > bytepos+1 {
+		filecontent[bytepos+1] = 0xFF;
+	}
+
+	if index_max > bytepos+2 {
+		filecontent[bytepos+2] = 0xFF;
+	}
+}
+
+fn mutator_enable_32_bits(filecontent:&mut Vec<u8>, pos:uint){
+	let shift_count :uint = pos % 8;
+	let bytepos = pos/8;
+	let index_max = filecontent.len()-1;
+
+	filecontent[bytepos] = 0xFF;
+
+	if(index_max > bytepos+1){
+		filecontent[bytepos+1] = 0xFF;
+	}
+
+	if(index_max > bytepos+2){
+		filecontent[bytepos+2] = 0xFF;
+	}
+
+	if(index_max > bytepos+3){
+		filecontent[bytepos+3] = 0xFF;
+	}
 }
 
 fn mutator_xor(filecontent:&mut Vec<u8>, pos:uint){
