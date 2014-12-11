@@ -45,11 +45,11 @@ fn main(){
 		return;
 	}
 
-	let aut = ["C:\\tmp\\7za.exe","e","-y","-pqqq","test.zip"]; // app under test
+	let aut = ["./php/php.exe","extract.php"]; // app under test
 	settings.app_args = aut.slice(0,aut.len());
 
 	let mut map:HashMap<u32,u16> = HashMap::new();
-	let mut i:int = 0;
+	let mut i:uint = 0;
 
 	let mut inputpath = os::getcwd().unwrap();
 	inputpath.push(settings.input_dir.clone());
@@ -70,7 +70,7 @@ fn main(){
 	}
 	
 	let mut rng = task_rng();
-	let fuzz_len = 20;
+	let fuzz_len:uint = 20;
 	let fuzz_length_bit :uint = fuzz_len * 8;
 
 	loop { // main loop - loops to infinity
@@ -78,25 +78,33 @@ fn main(){
 		let input_file = pick_file_from_dir(&inputpath);
 		let content_org = File::open(&input_file).read_to_end().unwrap();
 		let file_length_bit = (content_org.len()-1)*8;
-		let mut start_pos = rng.gen_range(0, file_length_bit - fuzz_length_bit);
-		let action_number:u8 = rng.gen_range(0,8);
+		let mut file_pos = rng.gen_range(0, file_length_bit - fuzz_length_bit);
+		let action_number:u8 = rng.gen_range(0,101);
 		let mutator_pos :(int,int) = (0,0);
-		let mut position_iter:uint = 0;
+		let mut iter_count_start = i;
 
 		loop { // position loop - increments file position
 			//loop { // iteration loop  - increments iteration count
-				let filepos = start_pos + position_iter;
 				let mut content = content_org.clone();
 				if !settings.benchmark {
 					match action_number {
-						0 => mutator_add_random_byte(&mut content, filepos),
-						1 => mutator_enable_1_bits(&mut content, filepos),
-						2 => mutator_enable_4_bits(&mut content, filepos),
-						3 => mutator_enable_8_bits(&mut content, filepos),
-						4 => mutator_enable_16_bits(&mut content, filepos),
-						5 => mutator_enable_24_bits(&mut content, filepos),
-						6 => mutator_enable_32_bits(&mut content, filepos),
-						7 => mutator_xor(&mut content, filepos),
+						0...5 => mutator_add_random_byte(&mut content, &mut file_pos),
+						6...10 => mutator_enable_random_byte(&mut content, &mut file_pos),
+						11...20 => mutator_enable_1_bits(&mut content,&mut file_pos),
+						20...25 => mutator_enable_4_bits(&mut content,&mut file_pos),
+						26...35 => mutator_set_value(&mut content,&mut file_pos, 0xFF),
+						36...40 => mutator_enable_16_bits(&mut content,&mut file_pos),
+						41...45 => mutator_enable_24_bits(&mut content,&mut file_pos),
+						46...55 => mutator_enable_32_bits(&mut content,&mut file_pos),
+						56...60 => mutator_xor(&mut content, &mut file_pos),
+						61...65 => mutator_set_value(&mut content, &mut file_pos, 0x00),
+						66...70 => mutator_set_value(&mut content,&mut file_pos, 0x02),
+						71...75 => mutator_set_value(&mut content,&mut file_pos, 0x03),
+						76...80 => mutator_set_value(&mut content,&mut file_pos, 0x04),
+						81...85 => mutator_set_value(&mut content,&mut file_pos, 0x05),
+						86...90 => mutator_set_value(&mut content,&mut file_pos, 0x06),
+						91...95 => mutator_set_value(&mut content,&mut file_pos, 0x07),
+						96...100 => mutator_set_value(&mut content,&mut file_pos, 0x08),
 						_ => panic!("not handled action")
 					}
 				}
@@ -127,8 +135,13 @@ fn main(){
 
 				i += 1;
 			//}
-			position_iter += 1;
-			if position_iter >= fuzz_len {
+			file_pos += 1;
+
+			if file_pos>=content.len(){
+				file_pos = 0;
+			}
+
+			if i-iter_count_start >= fuzz_len {
 				break;
 			}
 		}
@@ -162,93 +175,116 @@ fn write_content_to(content:&mut Vec<u8>,output_file:&Path){
 	};
 }
 
-fn mutator_add_random_byte(filecontent:&mut Vec<u8>, pos:uint){
+fn mutator_add_random_byte(filecontent:&mut Vec<u8>, pos:&mut uint){
 	let mut rng = task_rng();
-	let byte:u8 = rng.gen_range(0,255);
-	let bytepos = pos/8;
+	let bytevalue:u8 = rng.gen_range(0,255);
+	let bytepos = *pos/8;
 
-	filecontent.insert(bytepos,byte);
+	filecontent.insert(bytepos, bytevalue);
+	*pos+=8;
 }
 
-fn mutator_enable_1_bits(filecontent:&mut Vec<u8>, pos:uint){
-	let shift_count :uint = pos % 8;
-	let bytepos = pos/8;
+fn mutator_set_value(filecontent:&mut Vec<u8>, pos:&mut uint, bytevalue:u8){
+	let mut rng = task_rng();
+	let bytepos = *pos/8;
+
+	filecontent[bytepos]=bytevalue;
+	*pos+=8;
+}
+
+fn mutator_enable_random_byte(filecontent:&mut Vec<u8>, pos:&mut uint){
+	let mut rng = task_rng();
+	let bytevalue:u8 = rng.gen_range(0,255);
+	let bytepos = *pos/8;
+
+	filecontent[bytepos] = bytevalue;
+	*pos+=8;
+}
+
+fn mutator_enable_1_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
+	let shift_count :uint = *pos % 8;
+	let bytepos = *pos/8;
 	let m = 1 << shift_count;
 
 	filecontent[bytepos] = filecontent[bytepos]|m;
+	*pos+=8;
 }
 
-fn mutator_enable_4_bits(filecontent:&mut Vec<u8>, pos:uint){
-	let shift_count :uint = pos % 8;
-	let bytepos = pos/8;
+fn mutator_enable_4_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
+	let shift_count :uint = *pos % 8;
+	let bytepos = *pos/8;
 	let first_byte:u8 = 0b1111 << shift_count;
 	let second_byte:u8 = (2i.pow(shift_count-4)) as u8;
 	let index_max = filecontent.len()-1;
 
 	filecontent[bytepos] = filecontent[bytepos]|first_byte;
 	filecontent[bytepos+1] = filecontent[bytepos+1]|second_byte;
+	*pos+=1;
 }
 
-fn mutator_enable_8_bits(filecontent:&mut Vec<u8>, pos:uint){
-	let shift_count :uint = pos % 8;
-	let bytepos = pos/8;
-
-	filecontent[bytepos] = 0xFF;
-}
-
-fn mutator_enable_16_bits(filecontent:&mut Vec<u8>, pos:uint){
-	let shift_count :uint = pos % 8;
-	let bytepos = pos/8;
+fn mutator_enable_16_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
+	let shift_count :uint = *pos % 8;
+	let bytepos = *pos/8;
 	let index_max = filecontent.len()-1;
 
 	filecontent[bytepos] = 0xFF;
-	
+	*pos+=8;
+
 	if index_max>bytepos+1 {
 		filecontent[bytepos+1] = 0xFF;
+		*pos+=8;
 	}
 }
 
-fn mutator_enable_24_bits(filecontent:&mut Vec<u8>, pos:uint){
-	let shift_count :uint = pos % 8;
-	let bytepos = pos/8;
+fn mutator_enable_24_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
+	let shift_count :uint = *pos % 8;
+	let bytepos = *pos/8;
 	let index_max = filecontent.len()-1;
 
 	filecontent[bytepos] = 0xFF;
+	*pos+=8;
 
 	if index_max > bytepos+1 {
 		filecontent[bytepos+1] = 0xFF;
+		*pos+=8;
 	}
 
 	if index_max > bytepos+2 {
 		filecontent[bytepos+2] = 0xFF;
+		*pos+=8;
 	}
 }
 
-fn mutator_enable_32_bits(filecontent:&mut Vec<u8>, pos:uint){
-	let shift_count :uint = pos % 8;
-	let bytepos = pos/8;
+fn mutator_enable_32_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
+	let shift_count :uint = *pos % 8;
+	let bytepos = *pos/8;
 	let index_max = filecontent.len()-1;
 
 	filecontent[bytepos] = 0xFF;
+	*pos+=8;
 
 	if(index_max > bytepos+1){
 		filecontent[bytepos+1] = 0xFF;
+		*pos+=8;
 	}
 
 	if(index_max > bytepos+2){
 		filecontent[bytepos+2] = 0xFF;
+		*pos+=8;
 	}
 
 	if(index_max > bytepos+3){
 		filecontent[bytepos+3] = 0xFF;
+		*pos+=8;
 	}
 }
 
-fn mutator_xor(filecontent:&mut Vec<u8>, pos:uint){
-	let shift_count :uint = pos % 8;
-	let bytepos = pos/8;
+fn mutator_xor(filecontent:&mut Vec<u8>, pos:&mut uint){
+	let shift_count :uint = *pos % 8;
+	let bytepos = *pos/8;
 
 	filecontent[bytepos] = filecontent[bytepos]^filecontent[bytepos];
+	*pos+=8;
 }
 
 fn get_files_in_dir(dir:&Path) -> Vec<Path>{
