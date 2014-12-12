@@ -8,7 +8,7 @@ use std::io::File;
 use std::io::IoResult;
 use std::collections::HashMap;
 
-pub fn convert(inputpath:&Path, map:&mut HashMap<u32,u16>){
+pub fn convert(inputpath:&Path, map:&mut HashMap<u32,u16>, searchstr:&str){
 	//let outputpath = Path::new(outputfilepath);
 
 	let mut fileinput = BufferedReader::new(File::open(inputpath));
@@ -18,8 +18,27 @@ pub fn convert(inputpath:&Path, map:&mut HashMap<u32,u16>){
 	let module_size = read_module_table_size(&mut fileinput);
 	let modules = read_module_table(&mut fileinput, module_size.unwrap());
 	let bb_size = read_bb_table_size(&mut fileinput);
+	let modules_numbers = search_in_vec(modules, searchstr);
 	//read_bb_table_and_write(&mut fileinput, &mut fileoutput, bb_size.unwrap());
-	read_bb_table_to_hash(&mut fileinput, map, bb_size.unwrap());
+	
+
+	read_bb_table_to_hash(&mut fileinput, map, bb_size.unwrap(), modules_numbers.as_slice());
+}
+
+fn search_in_vec(lines:Vec<String>, name:&str)-> Vec<uint> {
+	let mut linenumbers:Vec<uint> = Vec::new();
+	let mut file = File::create(&Path::new("debug.txt"));
+	
+	for i in range(0,lines.len()) {
+		let line = lines[i].as_slice();
+		//println!("debug: {}", line);
+		if line.contains(name){
+			linenumbers.push(i);
+			file.write(&[(i as u8)]);
+		}
+	}
+
+	linenumbers
 }
 
 fn read_file_header(br:&mut BufferedReader<std::io::IoResult<File>>){
@@ -59,7 +78,7 @@ fn read_module_table(br:&mut BufferedReader<std::io::IoResult<File>>, size:uint)
 		let mod_id:int = from_str(cap.at(1)).unwrap();
 		let mod_size:int = from_str(cap.at(2)).unwrap();
 		let mod_path:String = from_str(cap.at(3)).unwrap();
-		//println!("{}, {}, {}", mod_id,mod_size,mod_path);
+		//println!("{}", mod_path);
 		modules.push(mod_path);
 	}
 
@@ -78,14 +97,15 @@ fn read_bb_table_and_write(br:&mut BufferedReader<std::io::IoResult<File>>,
 	}
 }
 
-fn read_bb_table_to_hash(br:&mut BufferedReader<std::io::IoResult<File>>, map:&mut HashMap<u32,u16>,size:uint){
-	let module_ids = 0;
+fn read_bb_table_to_hash(br:&mut BufferedReader<std::io::IoResult<File>>, map:&mut HashMap<u32,u16>, size:uint, modules:&[uint]){
+	//let module_ids = 0;
 
 	for _ in range(0,size){
 		let addr:u32 = br.read_le_u32().unwrap();
 		let size = br.read_le_u16().unwrap();
 		let mod_id = br.read_le_u16().unwrap();
-		if module_ids == mod_id {
+		
+		if modules.contains(&(mod_id as uint)) {
 			map.insert(addr, mod_id);
 		}
 		
