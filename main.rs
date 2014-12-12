@@ -24,7 +24,8 @@ struct AppSettings<'a> {
 	verbose:		bool,
 	help:			bool,
 	app_args:		&'a [&'a str],
-	benchmark:		bool
+	benchmark:		bool,
+	module_name: 	String
 }
 
 fn print_usage(program: &str, _opts: &[OptGroup]) {
@@ -46,6 +47,7 @@ fn main(){
 	}
 
 	let aut = ["./php/php.exe","extract.php"]; // app under test
+	settings.module_name = "php".to_string();
 	settings.app_args = aut.slice(0,aut.len());
 
 	let mut map:HashMap<u32,u16> = HashMap::new();
@@ -322,10 +324,19 @@ fn run_target(settings:&AppSettings, map:&mut HashMap<u32,u16>)->uint {
 		let inputpath = find_file_by_filter(".",".proc.log").unwrap();
 		// read file and update hashmap
 		let maplen = map.len();
-		readrcov::convert(&inputpath, map);	
+		readrcov::convert(&inputpath, map, settings.module_name.as_slice());
 		// any new code blocks ?
 		new_blocks = map.len()-maplen;
 		fs::unlink(&inputpath);
+
+		// todo: clear all proc.log;
+		loop{
+			let file = find_file_by_filter(".",".proc.log");
+			if file == None{
+				break;
+			}
+			fs::unlink(&(file.unwrap()));
+		}
 	}
 
 	new_blocks
@@ -365,7 +376,8 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 		verbose:		false,
 		help:			false,
 		app_args:		[].as_slice(),
-		benchmark:		false
+		benchmark:		false,
+		module_name:	"".to_string()
 	};
 
 	// check if arguments, if not => panic
