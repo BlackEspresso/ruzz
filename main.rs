@@ -18,14 +18,16 @@ mod runrio;
 
 struct AppSettings<'a> {
 	dynamorio_root:	String,
-	output_file:	String,
-	input_dir:		String,
+	output_file:	Path,
+	input_dir:		Path,
 	statistic_file:	String,
 	verbose:		bool,
 	help:			bool,
 	app_args:		&'a [&'a str],
 	benchmark:		bool,
-	module_name: 	String
+	module_name: 	String,
+	start_time:		time::Timespec,
+	iter_count:		u64
 }
 
 fn print_usage(program: &str, _opts: &[OptGroup]) {
@@ -46,111 +48,155 @@ fn main(){
 		return;
 	}
 
-	let aut = ["./php/php.exe","extract.php"]; // app under test
-	settings.module_name = "php".to_string();
-	settings.app_args = aut.slice(0,aut.len());
+	let aut = ["C:\\tmp\\7za.exe","e","-y","-pqqq","test.zip"]; // app under test
+	settings.module_name = "7za".to_string();
+	settings.app_args = aut.as_slice();
 
 	let mut map:HashMap<u32,u16> = HashMap::new();
-	let mut i:uint = 0;
+	let mut heatmap: HashMap<String, Vec<uint>> = HashMap::new();
+	// read previously created files and add to blocks to hashmap
+	// this enables pause + resume behaviour
+	println!("reading input files");
+	cleanup(&settings, &mut map);
+	println!("start fuzzing...");
 
-	let mut inputpath = os::getcwd().unwrap();
-	inputpath.push(settings.input_dir.clone());
+	let mutators_static = [mutator_set_byte_values, mutator_bit_walk_1, mutator_bit_walk_4, mutator_xor];
+	let mutators_random = [mutator_random_byte, mutator_add_random_byte];
+	let mutators_bruteforce = [mutator_bruteforce_byte];
+	// stage 1 create heat map
+	stage1_deterministic(&mut settings, &mutators_static, &mut map, &mut heatmap);
+	// stage 2 fuzz heatmap via bruteforce
+	stage2_bruteforce(&mut settings, &mutators_bruteforce, &mut map, &mut heatmap);
+	// stage 3 create new files randomly (random concatination, random byte add, radom remove ??)
+	//stage3(&mut settings, &mutators_static, &mut map, &mut heatmap);
+}
 
-	let output_file = Path::new(&settings.output_file);
+// stage 1 create heat map per file
+fn stage1_deterministic(settings:&mut AppSettings,
+	mutators:&[fn(&mut Vec<u8>, uint, uint)->uint],
+	map:&mut HashMap<u32,u16>,
+	heatmap:&mut HashMap<String, Vec<uint>> )
+{
+	let input_files = get_files_in_dir(&settings.input_dir);
 
-	let mut start = time::get_time();
+	for file in input_files.iter() {
+		let content_org = File::open(file).read_to_end().unwrap();
+		let file_length = content_org.len();
+		let filename = String::from_str(file.filename_str().unwrap());
 
-	let inputfiles = get_files_in_dir(&inputpath);
+		heatmap.insert(filename.clone(), Vec::new());
 
-	if !settings.benchmark {
-		// read previously created files and add to blocks to hashmap
-		// this enables pause + resume behaviour
-		println!("reading input files");
-		cleanup_input_files(&inputfiles,&settings,&mut map);
+		for pos in range(0, file_length) {
+			println!("pos {} of {}", pos,file_length);
+			for mutate in mutators.iter() {
+				let mut i:uint = 0;
 
-		println!("start fuzzing...");
-	}
-	
-	let mut rng = task_rng();
-	let fuzz_len:uint = 20;
-	let fuzz_length_bit :uint = fuzz_len * 8;
+				loop{
+					let mut content = content_org.clone();
+					let iter_left = (*mutate)(&mut content, pos, i);
 
-	loop { // main loop - loops to infinity
+					write_content_to(&mut content, &settings.output_file);
+					
+					let newBlocksCount:uint = run_target(settings, map);
 
-		let input_file = pick_file_from_dir(&inputpath);
-		let content_org = File::open(&input_file).read_to_end().unwrap();
-		let file_length_bit = (content_org.len()-1)*8;
-		let mut file_pos = rng.gen_range(0, file_length_bit - fuzz_length_bit);
-		let action_number:u8 = rng.gen_range(0,101);
-		let mutator_pos :(int,int) = (0,0);
-		let mut iter_count_start = i;
-
-		loop { // position loop - increments file position
-			//loop { // iteration loop  - increments iteration count
-				let mut content = content_org.clone();
-				if !settings.benchmark {
-					match action_number {
-						0...5 => mutator_add_random_byte(&mut content, &mut file_pos),
-						6...10 => mutator_enable_random_byte(&mut content, &mut file_pos),
-						11...20 => mutator_enable_1_bits(&mut content,&mut file_pos),
-						20...25 => mutator_enable_4_bits(&mut content,&mut file_pos),
-						26...35 => mutator_set_value(&mut content,&mut file_pos, 0xFF),
-						36...40 => mutator_enable_16_bits(&mut content,&mut file_pos),
-						41...45 => mutator_enable_24_bits(&mut content,&mut file_pos),
-						46...55 => mutator_enable_32_bits(&mut content,&mut file_pos),
-						56...60 => mutator_xor(&mut content, &mut file_pos),
-						61...65 => mutator_set_value(&mut content, &mut file_pos, 0x00),
-						66...70 => mutator_set_value(&mut content,&mut file_pos, 0x02),
-						71...75 => mutator_set_value(&mut content,&mut file_pos, 0x03),
-						76...80 => mutator_set_value(&mut content,&mut file_pos, 0x04),
-						81...85 => mutator_set_value(&mut content,&mut file_pos, 0x05),
-						86...90 => mutator_set_value(&mut content,&mut file_pos, 0x06),
-						91...95 => mutator_set_value(&mut content,&mut file_pos, 0x07),
-						96...100 => mutator_set_value(&mut content,&mut file_pos, 0x08),
-						_ => panic!("not handled action")
-					}
-				}
-
-				write_content_to(&mut content, &output_file);
-
-				let newBlocksCount = run_target(&settings, &mut map);
-
-				if i > 1 && newBlocksCount > 0 && !settings.benchmark {
-					let mut newpath = inputpath.clone();
-					let now = time::get_time();
-					newpath.push(now.sec.to_string()+"_"+now.nsec.to_string());
-					fs::copy(&output_file, &newpath);
-				}
-
-				if i % 1000 == 0 && i > 0 {
-					let now = time::get_time();
-					let diff = now.sec-start.sec;
-					println!("{} seconds for 1000 runs => {} runs per second", diff, 1000_f32/diff as f32);
-					if i % 3000 == 0{
-						println!("cleanup");
-						map.clear();
-						cleanup_input_files(&get_files_in_dir(&inputpath),&settings, &mut map);
+					if newBlocksCount > 0 {
+						let mut vec : &mut Vec<uint> = heatmap.get_mut(&filename).unwrap();
+						vec.push(newBlocksCount);
+						copy_to_input_path(settings);
 					}
 
-					start = now;
+					if iter_left <= 0 {
+						break;
+					}
+
+					statistics(settings);
+
+					i+=1;
 				}
-
-				i += 1;
-			//}
-			file_pos += 1;
-
-			if file_pos>=content.len(){
-				file_pos = 0;
 			}
+		}
+	}
+	write_heatmap(heatmap);
+}
 
-			if i-iter_count_start >= fuzz_len {
-				break;
+fn stage2_bruteforce(settings:&mut AppSettings,
+	mutators:&[fn(&mut Vec<u8>, uint, uint)->uint],
+	map:&mut HashMap<u32,u16>,
+	heatmap:&mut HashMap<String, Vec<uint>> )
+{
+	for (filename, hotbytes) in heatmap.iter() {
+		let mut input_file = settings.input_dir.clone();
+		input_file.push(filename);
+
+		let content_org = File::open(&input_file).read_to_end().unwrap();
+
+		for bytepos in hotbytes.iter() {
+			println!("hotbyte pos {}", bytepos);
+			
+			for mutate in mutators.iter() {
+				let mut i:uint = 0;
+				loop{
+					let mut content = content_org.clone();
+					let iter_left = (*mutate)(&mut content, *bytepos, i);
+
+					write_content_to(&mut content, &settings.output_file);
+					
+					let newBlocksCount:uint = run_target(settings, map);
+
+					if newBlocksCount > 0 {
+						//let mut vec : &mut Vec<uint> = heatmap.get_mut(&filename).unwrap();
+						//vec.push(newBlocksCount);
+						copy_to_input_path(settings);
+					}
+
+					if iter_left <= 0 {
+						break;
+					}
+
+					statistics(settings);
+
+					i+=1;
+				}
 			}
 		}
 	}
 }
 
-fn cleanup_input_files(inputfiles: &Vec<Path>, settings: &AppSettings, map: &mut HashMap<u32,u16>){
+
+fn statistics(settings: &mut AppSettings){
+	settings.iter_count += 1;
+
+	if settings.iter_count % 1000 == 0 {
+		let now = time::get_time();
+		let diff = (now.sec-settings.start_time.sec) as f32;
+		println!("iterations done: {}\n duration (sec): {}\n i/s: {}", settings.iter_count,  diff, 1000f32/diff);
+		settings.start_time = time::get_time();
+	}
+	
+}
+
+fn write_heatmap(heatmap:&HashMap<String, Vec<uint>>){
+	for (k,v) in heatmap.iter(){
+		let mut f = File::create(&Path::new(format!("./heatmap/{}",k)));
+		for b in v.iter(){
+			f.write(b.to_string().as_bytes());
+			f.write(b",");
+		}
+	}
+}
+
+fn copy_to_input_path(settings:&AppSettings){
+	let mut newpath = settings.input_dir.clone();
+	let now = time::get_time();
+
+	newpath.push(now.sec.to_string()+"_"+now.nsec.to_string());
+	fs::copy(&settings.output_file, &newpath);
+}
+
+fn cleanup(settings: &AppSettings, map: &mut HashMap<u32,u16>){
+	let inputfiles = get_files_in_dir(&settings.input_dir);
+	map.clear();	
+
 	for input_file in inputfiles.iter() {
 		let mut content = File::open(input_file).read_to_end().unwrap();
 		write_content_to(&mut content, &Path::new(&settings.output_file));
@@ -162,10 +208,7 @@ fn cleanup_input_files(inputfiles: &Vec<Path>, settings: &AppSettings, map: &mut
 	}
 }
 
-// 1. open input file
-// 2. mutate with mutator
-// 3. write output file
-fn write_content_to(content:&mut Vec<u8>,output_file:&Path){
+fn write_content_to(content:&mut Vec<u8>, output_file:&Path){
 	let mut ofile = match File::create(output_file){
 		Err(e) => panic!(e),
 		Ok(f) => f,
@@ -177,116 +220,70 @@ fn write_content_to(content:&mut Vec<u8>,output_file:&Path){
 	};
 }
 
-fn mutator_add_random_byte(filecontent:&mut Vec<u8>, pos:&mut uint){
+fn mutator_bruteforce_byte(filecontent:&mut Vec<u8>, pos:uint, iter:uint)->uint{
+	filecontent[pos] = iter as u8;
+	256-iter-1
+}
+
+fn mutator_set_byte_values(filecontent:&mut Vec<u8>, pos:uint, iter:uint)->uint{
+	let bytepos = pos/8;
+	let vals = [0,1,2,3,4,5,10,125,255-3,255-2,255-1,255];
+	
+	if iter < vals.len() {
+		filecontent[pos]=vals[iter];	
+	}
+
+	if iter > vals.len(){
+		vals.len()-1-iter-1
+	} else {
+		0
+	}
+}
+
+fn mutator_bit_walk_1(filecontent:&mut Vec<u8>, pos:uint, iter:uint)->uint{
+	let m = 1 << iter;
+
+	filecontent[pos] = filecontent[pos]|m;
+
+	if iter <= 6 {
+		7-iter-1
+	} else{
+		0
+	}
+}
+
+fn mutator_bit_walk_4(filecontent:&mut Vec<u8>, pos:uint, iter:uint)->uint{
+	let m = 0b00001111 << iter;
+
+	filecontent[pos] = filecontent[pos]|m;
+	
+	if iter <= 3 {
+		4-iter-1
+	} else{
+		0
+	}
+
+}
+
+fn mutator_xor(filecontent:&mut Vec<u8>, pos:uint, iter:uint)->uint{
+	filecontent[pos] = filecontent[pos]^filecontent[pos];
+	0
+}
+
+fn mutator_random_byte(filecontent:&mut Vec<u8>, pos:uint, iter:uint)->uint{
 	let mut rng = task_rng();
 	let bytevalue:u8 = rng.gen_range(0,255);
-	let bytepos = *pos/8;
 
-	filecontent.insert(bytepos, bytevalue);
-	*pos+=8;
+	filecontent[pos] = bytevalue;
+	1
 }
 
-fn mutator_set_value(filecontent:&mut Vec<u8>, pos:&mut uint, bytevalue:u8){
-	let mut rng = task_rng();
-	let bytepos = *pos/8;
-
-	filecontent[bytepos]=bytevalue;
-	*pos+=8;
-}
-
-fn mutator_enable_random_byte(filecontent:&mut Vec<u8>, pos:&mut uint){
+fn mutator_add_random_byte(filecontent:&mut Vec<u8>, pos:uint, iter:uint)->uint{
 	let mut rng = task_rng();
 	let bytevalue:u8 = rng.gen_range(0,255);
-	let bytepos = *pos/8;
 
-	filecontent[bytepos] = bytevalue;
-	*pos+=8;
-}
-
-fn mutator_enable_1_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
-	let shift_count :uint = *pos % 8;
-	let bytepos = *pos/8;
-	let m = 1 << shift_count;
-
-	filecontent[bytepos] = filecontent[bytepos]|m;
-	*pos+=8;
-}
-
-fn mutator_enable_4_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
-	let shift_count :uint = *pos % 8;
-	let bytepos = *pos/8;
-	let first_byte:u8 = 0b1111 << shift_count;
-	let second_byte:u8 = (2i.pow(shift_count-4)) as u8;
-	let index_max = filecontent.len()-1;
-
-	filecontent[bytepos] = filecontent[bytepos]|first_byte;
-	filecontent[bytepos+1] = filecontent[bytepos+1]|second_byte;
-	*pos+=1;
-}
-
-fn mutator_enable_16_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
-	let shift_count :uint = *pos % 8;
-	let bytepos = *pos/8;
-	let index_max = filecontent.len()-1;
-
-	filecontent[bytepos] = 0xFF;
-	*pos+=8;
-
-	if index_max>bytepos+1 {
-		filecontent[bytepos+1] = 0xFF;
-		*pos+=8;
-	}
-}
-
-fn mutator_enable_24_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
-	let shift_count :uint = *pos % 8;
-	let bytepos = *pos/8;
-	let index_max = filecontent.len()-1;
-
-	filecontent[bytepos] = 0xFF;
-	*pos+=8;
-
-	if index_max > bytepos+1 {
-		filecontent[bytepos+1] = 0xFF;
-		*pos+=8;
-	}
-
-	if index_max > bytepos+2 {
-		filecontent[bytepos+2] = 0xFF;
-		*pos+=8;
-	}
-}
-
-fn mutator_enable_32_bits(filecontent:&mut Vec<u8>, pos:&mut uint){
-	let shift_count :uint = *pos % 8;
-	let bytepos = *pos/8;
-	let index_max = filecontent.len()-1;
-
-	filecontent[bytepos] = 0xFF;
-	*pos+=8;
-
-	if(index_max > bytepos+1){
-		filecontent[bytepos+1] = 0xFF;
-		*pos+=8;
-	}
-
-	if(index_max > bytepos+2){
-		filecontent[bytepos+2] = 0xFF;
-		*pos+=8;
-	}
-
-	if(index_max > bytepos+3){
-		filecontent[bytepos+3] = 0xFF;
-		*pos+=8;
-	}
-}
-
-fn mutator_xor(filecontent:&mut Vec<u8>, pos:&mut uint){
-	let shift_count :uint = *pos % 8;
-	let bytepos = *pos/8;
-
-	filecontent[bytepos] = filecontent[bytepos]^filecontent[bytepos];
-	*pos+=8;
+	filecontent.insert(pos, bytevalue);
+	1
 }
 
 fn get_files_in_dir(dir:&Path) -> Vec<Path>{
@@ -320,29 +317,27 @@ fn run_target(settings:&AppSettings, map:&mut HashMap<u32,u16>)->uint {
 	
 	let mut new_blocks: uint = 0;
 
-	if !settings.benchmark {
-		let inputpath = find_file_by_filter(".",".proc.log").unwrap();
-		// read file and update hashmap
-		let maplen = map.len();
-		readrcov::convert(&inputpath, map, settings.module_name.as_slice());
-		// any new code blocks ?
-		new_blocks = map.len()-maplen;
-		fs::unlink(&inputpath);
+	let inputpath = find_file_by_filter(".",".proc.log").unwrap();
+	// read file and update hashmap
+	let maplen = map.len();
+	readrcov::convert(&inputpath, map, settings.module_name.as_slice());
+	// any new code blocks ?
+	new_blocks = map.len()-maplen;
 
-		// todo: clear all proc.log;
-		loop{
-			let file = find_file_by_filter(".",".proc.log");
-			if file == None{
-				break;
-			}
-			fs::unlink(&(file.unwrap()));
+	// clear all proc.log files
+	loop{
+		let file = find_file_by_filter(".",".proc.log");
+		if file == None {
+			break;
 		}
+
+		fs::unlink(&(file.unwrap()));
 	}
 
 	new_blocks
 }
 
-fn find_file_by_filter(path:&str,filter:&str) -> Option<Path>{
+fn find_file_by_filter(path:&str, filter:&str) -> Option<Path>{
 	let paths = fs::readdir(&Path::new(path)).unwrap();
 
     for path in paths.iter() {
@@ -370,14 +365,16 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 
 	let mut settings = AppSettings {
 		dynamorio_root :"c:\\dynamorio-package\\".to_string(),
-		output_file: 	"".to_string(),
-		input_dir:		"".to_string(),
+		output_file: 	Path::new("/"),
+		input_dir:		Path::new("/"),
 		statistic_file:	"".to_string(),
 		verbose:		false,
 		help:			false,
 		app_args:		[].as_slice(),
 		benchmark:		false,
-		module_name:	"".to_string()
+		module_name:	"".to_string(),
+		start_time:		time::get_time(),
+		iter_count:		0
 	};
 
 	// check if arguments, if not => panic
@@ -402,12 +399,14 @@ fn read_arguments(args:&Vec<String>)->AppSettings{
 
 	let output = matches.opt_str("o");
 	if output != None {
-		settings.output_file = output.unwrap().to_string();	
+		let output_file = output.unwrap().to_string();
+		settings.output_file = Path::new(output_file);
 	}
 	
 	let input = matches.opt_str("i");
 	if input != None {
-		settings.input_dir = input.unwrap().to_string();	
+		let input_path = input.unwrap().to_string();
+		settings.input_dir = Path::new(input_path);
 	}
 
 	settings

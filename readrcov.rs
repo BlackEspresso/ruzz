@@ -27,14 +27,14 @@ pub fn convert(inputpath:&Path, map:&mut HashMap<u32,u16>, searchstr:&str){
 
 fn search_in_vec(lines:Vec<String>, name:&str)-> Vec<uint> {
 	let mut linenumbers:Vec<uint> = Vec::new();
-	let mut file = File::create(&Path::new("debug.txt"));
+	//let mut file = File::create(&Path::new("debug.txt"));
 	
 	for i in range(0,lines.len()) {
 		let line = lines[i].as_slice();
 		//println!("debug: {}", line);
 		if line.contains(name){
 			linenumbers.push(i);
-			file.write(&[(i as u8)]);
+			//file.write(&[(i as u8)]);
 		}
 	}
 
