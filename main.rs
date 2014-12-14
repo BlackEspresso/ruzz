@@ -11,7 +11,7 @@ use std::os;
 use std::io::fs;
 use std::io::File;
 use std::num::Int;
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 use std::rand::{task_rng, Rng};
 mod readrcov;
 mod runrio;
@@ -53,7 +53,7 @@ fn main(){
 	settings.app_args = aut.as_slice();
 
 	let mut map:HashMap<u32,u16> = HashMap::new();
-	let mut heatmap: HashMap<String, Vec<uint>> = HashMap::new();
+	let mut heatmap: HashMap<String, HashSet<uint>> = HashMap::new();
 	// read previously created files and add to blocks to hashmap
 	// this enables pause + resume behaviour
 	println!("reading input files");
@@ -63,19 +63,23 @@ fn main(){
 	let mutators_static = [mutator_set_byte_values, mutator_bit_walk_1, mutator_bit_walk_4, mutator_xor];
 	let mutators_random = [mutator_random_byte, mutator_add_random_byte];
 	let mutators_bruteforce = [mutator_bruteforce_byte];
-	// stage 1 create heat map
-	stage1_deterministic(&mut settings, &mutators_static, &mut map, &mut heatmap);
-	// stage 2 fuzz heatmap via bruteforce
-	stage2_bruteforce(&mut settings, &mutators_bruteforce, &mut map, &mut heatmap);
-	// stage 3 create new files randomly (random concatination, random byte add, radom remove ??)
-	//stage3(&mut settings, &mutators_static, &mut map, &mut heatmap);
+	
+	loop{
+		// stage 1 create heat map
+		stage1_deterministic(&mut settings, &mutators_static, &mut map, &mut heatmap);
+		cleanup(&settings, &mut map);
+		// stage 2 fuzz heatmap via bruteforce
+		stage2_bruteforce(&mut settings, &mutators_bruteforce, &mut map, &mut heatmap);
+		// stage 3 create new files randomly (random concatination, random byte add, radom remove ??)
+		//stage3(&mut settings, &mutators_static, &mut map, &mut heatmap);
+	}
 }
 
 // stage 1 create heat map per file
 fn stage1_deterministic(settings:&mut AppSettings,
 	mutators:&[fn(&mut Vec<u8>, uint, uint)->uint],
 	map:&mut HashMap<u32,u16>,
-	heatmap:&mut HashMap<String, Vec<uint>> )
+	heatmap:&mut HashMap<String, HashSet<uint>> )
 {
 	let input_files = get_files_in_dir(&settings.input_dir);
 
@@ -83,8 +87,12 @@ fn stage1_deterministic(settings:&mut AppSettings,
 		let content_org = File::open(file).read_to_end().unwrap();
 		let file_length = content_org.len();
 		let filename = String::from_str(file.filename_str().unwrap());
+		
+		if heatmap.contains_key(&filename){
+			continue;
+		}
 
-		heatmap.insert(filename.clone(), Vec::new());
+		heatmap.insert(filename.clone(), HashSet::new());
 
 		for pos in range(0, file_length) {
 			println!("pos {} of {}", pos,file_length);
@@ -100,8 +108,8 @@ fn stage1_deterministic(settings:&mut AppSettings,
 					let newBlocksCount:uint = run_target(settings, map);
 
 					if newBlocksCount > 0 {
-						let mut vec : &mut Vec<uint> = heatmap.get_mut(&filename).unwrap();
-						vec.push(newBlocksCount);
+						let mut vec : &mut HashSet<uint> = heatmap.get_mut(&filename).unwrap();
+						vec.insert(pos);
 						copy_to_input_path(settings);
 					}
 
@@ -115,20 +123,23 @@ fn stage1_deterministic(settings:&mut AppSettings,
 				}
 			}
 		}
+		write_heatmap(heatmap);
 	}
-	write_heatmap(heatmap);
 }
 
 fn stage2_bruteforce(settings:&mut AppSettings,
 	mutators:&[fn(&mut Vec<u8>, uint, uint)->uint],
 	map:&mut HashMap<u32,u16>,
-	heatmap:&mut HashMap<String, Vec<uint>> )
+	heatmap:&mut HashMap<String, HashSet<uint>> )
 {
 	for (filename, hotbytes) in heatmap.iter() {
 		let mut input_file = settings.input_dir.clone();
 		input_file.push(filename);
 
-		let content_org = File::open(&input_file).read_to_end().unwrap();
+		let mut content_org = match File::open(&input_file).read_to_end() {
+			Ok(f) => f,
+			Err(_) => continue,
+		};
 
 		for bytepos in hotbytes.iter() {
 			println!("hotbyte pos {}", bytepos);
@@ -175,7 +186,7 @@ fn statistics(settings: &mut AppSettings){
 	
 }
 
-fn write_heatmap(heatmap:&HashMap<String, Vec<uint>>){
+fn write_heatmap(heatmap:&HashMap<String, HashSet<uint>>){
 	for (k,v) in heatmap.iter(){
 		let mut f = File::create(&Path::new(format!("./heatmap/{}",k)));
 		for b in v.iter(){
